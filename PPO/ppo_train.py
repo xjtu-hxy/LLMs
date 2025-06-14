@@ -6,7 +6,30 @@ import random
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
+from typing import Optional, Union, Tuple
 
+
+class PromptDataset(Dataset):
+    def __init__(self, prompts, tokenizer, apply_chat_template=False):
+        self.prompts = prompts
+        self.tokenizer = tokenizer
+        self.final_prompts = []
+
+        for prompt in prompts:
+            if apply_chat_template:
+                content = [{"role": "user", "content": prompt}]
+                prompt = self.tokenizer.apply_chat_template(content, tokenize=False, add_generation_prompt=True)
+            else:
+                prompt = self.tokenizer.bos_token + prompt
+            
+            self.final_prompts.append(prompt)
+    
+    def __len__(self):
+        return len(self.prompts)
+
+    def __getitem__(self, index):
+        return self.final_prompts[index]
+        
 
 class Critic(nn.Module):
     #价值模型（评论家模型）
@@ -22,6 +45,60 @@ class Critic(nn.Module):
         values = value_model_output.squeeze(-1)[:, -num_actions:]
         return values
 
+class ExperienceBuffer:
+    def __init__(self, limit):
+        self.limit = limit
+        self.buffer = []
+    
+    def append(self, experiences):
+        batch = [{} for _ in range(len(experiences))]
+        keys = (
+            "seqs",
+            "action_log_probs",
+            "values",
+            "returns",
+            "advantages",
+            "attention_mask",
+            "action_mask",
+            "num_actions"
+        )
+
+        for key in keys:
+            for i, experience in enumerate(experiences):
+                value = getattr(experience, key)
+                batch[i][key] = value
+        
+        self.buffer.extend(batch)
+        if len(self.buffer) >= self.limit:
+            self.buffer = self.buffer[len(self.buffer)-self.limit:]
+    
+    def get_batches(self, batch_size):
+        return random.sample(self.buffer, batch_size)
+
+    def clear(self):
+        self.buffer = []
+    
+    def __len__(self):
+        return len(self.buffer)
+    
+    def __getitem__(self, index):
+        return self.buffer[index]
+
+@dataclass
+class Samples:
+    seqs: torch.Tensor
+    attention_mask: Optional[torch.LongTensor]
+
+
+def train():
+    # 初始化经验池
+    buffer = ExperienceBuffer(limit=100)
+    steps = 0
+    for episode in range(episodes):
+        for rand_prompts in prompts_dataloader:
+            # 生成样本（获取模型推理结果）
+            samples = 
+            # 生成经验（获取优势、奖励、回报等）
 
 if __name__ == '__main__':
     device = ' cuda' if torch.cuda.is_available() else 'cpu'
@@ -59,4 +136,26 @@ if __name__ == '__main__':
     critic_model = Critic(actor_model.base_model).to(device)
 
     # 初始化优化器
-    optimizer_act
+    optimizer_actor = torch.optim.Adam(actor_model.parameters(), lr=0.00005)
+    optimizer_critic = torch.optim.Adam(critic_model.parameters(), lr=0.00005)
+
+    # 填充方式为左填充
+    actor_tokenizer.padding_side = 'left'
+    eos_token_id = actor_tokenizer.eos_token_id
+    pad_token_id = actor_tokenizer.pad_token_id
+
+    prompt_list = [
+        '请问1+1等于多少？',
+        'PowerShell，如何知道BIOS中的虚拟化是否已禁用',
+        '为什么人们喜欢在水族馆里游泳，而不是在游泳池里？',
+        '你是一位营销专家。为Instagram reels写30个带有营销技巧的脚本。',
+        '你是一位营销专家。为Instagram reels写30个带有营销技巧的脚本。',
+        '你是一位营销专家。为Instagram reels写30个带有营销技巧的脚本。',
+        '为什么所有的镜子都是矩形的？',
+        '我们在受感染的植物根部可以找到哪一种，臭氧还是金子？'
+    ]
+
+    prompts_dataset = PromptDataset(prompt_list, actor_tokenizer, apply_chat_template=True)
+    prompts_dataloader = DataLoader(prompts_dataset, batch_size=rollout_batch_size, shuffle=True)
+
+    train()
